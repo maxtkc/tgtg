@@ -19,6 +19,7 @@ jobs:
           python-version: ${{ matrix.python }}
           without: build
       - uses: actions/cache@v4
+        if: runner.os != 'macOS'
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-python-${{ matrix.python }}-${{ hashFiles('poetry.lock', '.pre-commit-config.yaml') }}-${{ runner.os }}-${{ runner.arch }}
