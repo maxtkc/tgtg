@@ -132,15 +132,20 @@ class Scanner:
         return [Item(item, self.location, self.config.locale, self.config.time_format) for item in items]
 
     def _check_item(self, item: Item) -> None:
-        """Checks if the available item amount raised from zero to something
+        """Checks if the available item amount raised from zero to something or price changed
         and triggers notifications.
         """
         state_item = self.state.get(item.item_id)
         if state_item is not None:
-            if state_item.items_available == item.items_available:
+            if state_item.items_available == item.items_available and state_item.price == item.price:
                 return
-            log.info("%s - new amount: %s", item.display_name, item.items_available)
+            if state_item.items_available != item.items_available:
+                log.info("%s - amount changed from %s to %s", item.display_name, state_item.items_available, item.items_available)
             if state_item.items_available == 0 and item.items_available > 0:
+                self._send_messages(item)
+                self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
+            if state_item.items_available > 0 and item.items_available > 0 and state_item.price != item.price:
+                log.info("%s - price changed from %s to %s", item.display_name, state_item.price, item.price)
                 self._send_messages(item)
                 self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
         self.metrics.update(item)
