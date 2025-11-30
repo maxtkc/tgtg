@@ -141,13 +141,14 @@ class Scanner:
                 return
             if state_item.items_available != item.items_available:
                 log.info("%s - amount changed from %s to %s", item.display_name, state_item.items_available, item.items_available)
-            if state_item.items_available == 0 and item.items_available > 0:
-                self._send_messages(item)
-                self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
-            if state_item.items_available > 0 and item.items_available > 0 and state_item.price != item.price:
+                if state_item.items_available == 0:
+                    self._send_messages(item)
+                    self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
+            if self.config.enable_price_monitoring and state_item.price != item.price:
                 log.info("%s - price changed from %s to %s", item.display_name, state_item.price, item.price)
-                self._send_messages(item)
-                self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
+                if state_item.items_available > 0 and item.items_available > 0:
+                    self._send_messages(item)
+                    self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
         self.metrics.update(item)
         self.state[item.item_id] = item
 
