@@ -137,18 +137,19 @@ class Scanner:
         """
         state_item = self.state.get(item.item_id)
         if state_item is not None:
-            if state_item.items_available == item.items_available and state_item.price == item.price:
-                return
+            item._previous_price = state_item._price
+            send_notification = False
             if state_item.items_available != item.items_available:
                 log.info("%s - amount changed from %s to %s", item.display_name, state_item.items_available, item.items_available)
                 if state_item.items_available == 0:
-                    self._send_messages(item)
-                    self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
-            if self.config.enable_price_monitoring and state_item.price != item.price:
-                log.info("%s - price changed from %s to %s", item.display_name, state_item.price, item.price)
-                if state_item.items_available > 0 and item.items_available > 0:
-                    self._send_messages(item)
-                    self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
+                    send_notification = True
+            if state_item.price != item.price:
+                log.info("%s - price changed from %ss to %s", item.display_name, state_item.price, item.price)
+                if self.config.price_monitoring and item.items_available > 0 and item._price < state_item._price:
+                    send_notification = True
+            if send_notification:
+                self._send_messages(item)
+                self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
         self.metrics.update(item)
         self.state[item.item_id] = item
 

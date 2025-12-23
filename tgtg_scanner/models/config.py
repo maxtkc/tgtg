@@ -559,7 +559,7 @@ class Config(BaseConfig):
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     script: ScriptConfig = field(default_factory=ScriptConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
-    enable_price_monitoring: bool = False
+    price_monitoring: bool = False
 
     def __post_init__(self):
         if self.file:
@@ -626,7 +626,7 @@ class Config(BaseConfig):
         self._ini_get_boolean(parser, "MAIN", "Quiet", "quiet")
         self._ini_get_boolean(parser, "MAIN", "Docker", "docker")
         self._ini_get_boolean(parser, "MAIN", "Activity", "activity")
-        self._ini_get_boolean(parser, "MAIN", "EnablePriceMonitoring", "enable_price_monitoring")
+        self._ini_get_boolean(parser, "MAIN", "PriceMonitoring", "price_monitoring")
 
     def _read_env(self):
         self._env_get_list("ITEM_IDS", "item_ids")
@@ -641,7 +641,7 @@ class Config(BaseConfig):
         self._env_get_boolean("QUIET", "quiet")
         self._env_get_boolean("DOCKER", "docker")
         self._env_get_boolean("ACTIVITY", "activity")
-        self._env_get_boolean("ENABLE_PRICE_MONITORING", "enable_price_monitoring")
+        self._env_get_boolean("PRICE_MONITORING", "price_monitoring")
 
     def _open(self, file: str, mode: str) -> IO[Any]:
         if self.token_path is None:
