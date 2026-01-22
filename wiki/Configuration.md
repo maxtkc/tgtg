@@ -79,6 +79,7 @@ You can combine multiple crons as semicolon separated list.
 | TimeFormat      | TIME_FORMAT      | 12h or 24h                                                                        | `24h`       |
 | PriceMonitoring | PRICE_MONITORING | Send notifications on price drops                                                 | `false`     |
 | Activity        | ACTIVITY         | show running indicator (always disabled in docker)                                | `true`      |
+| Port            | PORT             | Port for Login Process Webserver. (Defaults to random free port)                  | `0`         |
 |                 | TZ               | timezone for docker based setups, e.g. `Berlin/Europe`                            |             |
 |                 | UID              | set user id for docker container                                                  | `1000`      |
 |                 | GID              | set group id for docker container                                                 | `1000`      |
