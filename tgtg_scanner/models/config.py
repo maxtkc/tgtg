@@ -66,6 +66,14 @@ class BaseConfig(ABC):
         if value is not None:
             setattr(self, attr, value)
 
+    def _ini_get_float(self, parser: configparser.ConfigParser, section: str, key: str, attr: str):
+        try:
+            value = parser.getfloat(section, key, fallback=None)
+        except ValueError as err:
+            raise ConfigurationError(f"Invalid float value for {section}.{key} - {err}") from err
+        if value is not None:
+            setattr(self, attr, value)
+
     def _ini_get_list(self, parser: configparser.ConfigParser, section: str, key: str, attr: str):
         value = parser.get(section, key, fallback=None)
         if value is not None:
@@ -104,6 +112,14 @@ class BaseConfig(ABC):
                 setattr(self, attr, int(value))
             except ValueError as err:
                 raise ConfigurationError(f"Invalid integer value for {key} - {err}") from err
+
+    def _env_get_float(self, key: str, attr: str):
+        value = getenv(key)
+        if value is not None:
+            try:
+                setattr(self, attr, float(value))
+            except ValueError as err:
+                raise ConfigurationError(f"Invalid float value for {key} - {err}") from err
 
     def _env_get_list(self, key: str, attr: str):
         value = getenv(key)
@@ -561,6 +577,9 @@ class Config(BaseConfig):
     script: ScriptConfig = field(default_factory=ScriptConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     price_monitoring: bool = False
+    travel_radius: int = 5
+    travel_min_rating: float = 4.5
+    travel_skip_favorites: bool = True
 
     def __post_init__(self):
         if self.file:
@@ -628,6 +647,9 @@ class Config(BaseConfig):
         self._ini_get_boolean(parser, "MAIN", "Docker", "docker")
         self._ini_get_boolean(parser, "MAIN", "Activity", "activity")
         self._ini_get_boolean(parser, "MAIN", "PriceMonitoring", "price_monitoring")
+        self._ini_get_int(parser, "MAIN", "TravelRadius", "travel_radius")
+        self._ini_get_float(parser, "MAIN", "TravelMinRating", "travel_min_rating")
+        self._ini_get_boolean(parser, "MAIN", "TravelSkipFavorites", "travel_skip_favorites")
         self._ini_get_int(parser, "MAIN", "Port", "port")
 
     def _read_env(self):
@@ -644,6 +666,9 @@ class Config(BaseConfig):
         self._env_get_boolean("DOCKER", "docker")
         self._env_get_boolean("ACTIVITY", "activity")
         self._env_get_boolean("PRICE_MONITORING", "price_monitoring")
+        self._env_get_int("TRAVEL_RADIUS", "travel_radius")
+        self._env_get_float("TRAVEL_MIN_RATING", "travel_min_rating")
+        self._env_get_boolean("TRAVEL_SKIP_FAVORITES", "travel_skip_favorites")
         self._env_get_int("PORT", "port")
 
     def _open(self, file: str, mode: str) -> IO[Any]:

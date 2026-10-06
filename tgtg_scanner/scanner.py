@@ -17,6 +17,7 @@ from tgtg_scanner.models import (
     Reservations,
 )
 from tgtg_scanner.models.stock_monitor import StockMonitor
+from tgtg_scanner.models.travel import Travel
 from tgtg_scanner.notifiers import Notifiers
 from tgtg_scanner.tgtg_client import BASE_URL, TgtgClient, extract_datadome, normalize_cookie, resolve_user_agent
 
@@ -53,6 +54,8 @@ class Scanner:
         self.item_ids = {item_id for item_id in self.config.item_ids if item_id}
         self.cron = self.config.schedule_cron
         self.monitor = StockMonitor(price_monitoring=self.config.price_monitoring)
+        self.travel = Travel(self.config.travel_radius, self.config.travel_min_rating, self.config.token_path)
+        self.travel_monitor = StockMonitor(notify_on_first_sight=True)
         self.notifiers: Notifiers | None = None
         self.location: Location | None = None
         self.tgtg_client = self._build_client(config)
@@ -138,20 +141,53 @@ class Scanner:
         if self.notifiers is None:
             raise RuntimeError("Notifiers not initialized!")
 
-        for item in self._load_items():
-            if self.monitor.observe(item):
-                self._send_messages(item)
-                self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
-            self.metrics.update(item)
+        travel_active = self.travel.is_active
+        if travel_active:
+            self._travel_job()
+        else:
+            self.travel_monitor.state.clear()
 
-        amounts = {item_id: item.items_available for item_id, item in self.monitor.state.items()}
-        log.debug("new State: %s", amounts)
-        self.reservations.make_orders(self.monitor.state, self.notifiers.send)
+        if not (travel_active and self.config.travel_skip_favorites):
+            for item in self._load_items():
+                if self.monitor.observe(item):
+                    self._send_messages(item)
+                    self.metrics.send_notifications.labels(item.item_id, item.display_name).inc()
+                self.metrics.update(item)
 
-        if not self.monitor.state:
-            log.warning("No items in observation! Did you add any favorites?")
+            amounts = {item_id: item.items_available for item_id, item in self.monitor.state.items()}
+            log.debug("new State: %s", amounts)
+            self.reservations.make_orders(self.monitor.state, self.notifiers.send)
+
+            if not self.monitor.state:
+                log.warning("No items in observation! Did you add any favorites?")
 
         self._save_tokens()
+
+    def _travel_job(self) -> None:
+        """Notify on well rated bags around the travel location.
+
+        Bags are reported when first seen in stock and when they come back into stock.
+        """
+        state = self.travel.state
+        try:
+            data = self.tgtg_client.get_items(
+                favorites_only=False,
+                latitude=state.latitude,
+                longitude=state.longitude,
+                radius=state.radius,
+                page_size=50,
+            )
+        except TgtgAPIError as err:
+            log.error(err)
+            return
+        for raw in data:
+            item = self._item_from_api(raw)
+            if item._rating is None or item._rating < state.min_rating:
+                continue
+            item._travel = True
+            if self.travel_monitor.observe(item):
+                self._send_messages(item)
+        log.debug("Travel mode: %s items, %s matching", len(data), len(self.travel_monitor.state))
 
     def _send_messages(self, item: Item) -> None:
         """Send notifications for Item."""
@@ -179,7 +215,7 @@ class Scanner:
         # activate and test notifiers
         if self.config.metrics:
             self.metrics.enable_metrics()
-        self.notifiers = Notifiers(self.config, self.reservations, self.favorites)
+        self.notifiers = Notifiers(self.config, self.reservations, self.favorites, self.travel)
         self.notifiers.start()
         if not self.config.disable_tests and self.notifiers.notifier_count > 0:
             log.info("Sending test Notifications ...")

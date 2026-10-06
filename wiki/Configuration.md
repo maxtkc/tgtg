@@ -29,6 +29,7 @@ Variables with the `locale` property are affected by the `locale` option and ret
 | price            | item price                          | `3.20`                                                                                                 |        |
 | previous_price   | previous item price                 | `3.40`                                                                                                 |        |
 | price_drop       | recent price drop                   | `YES`                                                                                                  |        |
+| travel_distance  | distance from the travel location   | `1.2 km`                                                                                               |        |
 | value            | item value                          | `9.60`                                                                                                 |        |
 | currency         | price/value currency                | `EUR`                                                                                                  |        |
 | pickupdate       | formatted string                    | `tomorrow, 18:00 - 21:50`                                                                              | YES    |
@@ -78,6 +79,9 @@ You can combine multiple crons as semicolon separated list.
 | Locale          | LOCALE           | localization                                                                      | `en_US`     |
 | TimeFormat      | TIME_FORMAT      | 12h or 24h                                                                        | `24h`       |
 | PriceMonitoring | PRICE_MONITORING | Send notifications on price drops                                                 | `false`     |
+| TravelRadius    | TRAVEL_RADIUS    | default travel mode search radius in km                                           | `5`         |
+| TravelMinRating | TRAVEL_MIN_RATING | default minimum bag rating in travel mode                                        | `4.5`       |
+| TravelSkipFavorites | TRAVEL_SKIP_FAVORITES | stop scanning favorites while travel mode is on                          | `true`      |
 | Activity        | ACTIVITY         | show running indicator (always disabled in docker)                                | `true`      |
 | Port            | PORT             | Port for Login Process Webserver. (Defaults to random free port)                  | `0`         |
 |                 | TZ               | timezone for docker based setups, e.g. `Berlin/Europe`                            |             |
@@ -166,6 +170,19 @@ You can combine multiple crons as semicolon separated list.
 | OnlyReservations | TELEGRAM_ONLY_RESERVATIONS | only send notifications for reservations | `false`                                                                                                                 |                     |           |
 | Timeout          | TELEGRAM_TIMEOUT           | timeout for telegram API requests        | 60                                                                                                                      |                     |           |
 | Cron             | TELEGRAM_CRON              | enable notification only on schedule     | `* * * * *`                                                                                                             |                     |           |
+
+#### Travel mode
+
+Travel mode scans around a location instead of your favorites and notifies on bags rated at
+least `TravelMinRating`, both when they are first seen in stock and when they come back into stock.
+
+- `/travel [radius_km] [min_rating] [days]` enables travel mode and asks for your location,
+  e.g. `/travel 3 4.5 2`. Without `days` it stays on until `/home`.
+- Sharing a location (or a live location) sets the search center.
+- `/travelstatus` shows the current settings, `/home` turns travel mode off.
+
+Travel notifications are prefixed with the distance from the search center. The settings are
+saved to `travel.json` in the token path and survive restarts.
 
 #### Note on Markdown V2
 

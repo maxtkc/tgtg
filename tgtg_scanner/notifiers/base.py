@@ -5,12 +5,15 @@ from queue import Queue
 
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
 from tgtg_scanner.models.reservations import Reservation
+from tgtg_scanner.models.travel import Travel
 
 log = logging.getLogger("tgtg")
 
 
 class Notifier(ABC):
     """Base Notifier."""
+
+    travel: Travel | None = None
 
     @abstractmethod
     def __init__(self, config: Config, reservations: Reservations, favorites: Favorites):

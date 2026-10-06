@@ -2,6 +2,7 @@ import logging
 
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
 from tgtg_scanner.models.reservations import Reservation
+from tgtg_scanner.models.travel import Travel
 from tgtg_scanner.notifiers.apprise import Apprise
 from tgtg_scanner.notifiers.base import Notifier
 from tgtg_scanner.notifiers.console import Console
@@ -22,8 +23,10 @@ NOTIFIERS: list[type[Notifier]] = [Apprise, Console, PushSafer, SMTP, IFTTT, Ntf
 class Notifiers:
     """Notifier Manager."""
 
-    def __init__(self, config: Config, reservations: Reservations, favorites: Favorites):
+    def __init__(self, config: Config, reservations: Reservations, favorites: Favorites, travel: Travel | None = None):
         self._notifiers: list[Notifier] = [NotifierCls(config, reservations, favorites) for NotifierCls in NOTIFIERS]
+        for notifier in self._notifiers:
+            notifier.travel = travel
         log.info("Activated notifiers:")
         if self.notifier_count == 0:
             log.warning("No notifiers configured!")

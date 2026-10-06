@@ -44,6 +44,7 @@ ATTRS = [
     "duration_driving",
     "duration_transit",
     "duration_biking",
+    "travel_distance",
 ]
 
 log = logging.getLogger("tgtg")
@@ -61,6 +62,7 @@ class Item:
         self.pickup_interval_start: str | None = data.get("pickup_interval", {}).get("start")
         self.pickup_interval_end: str | None = data.get("pickup_interval", {}).get("end")
         self.pickup_location: str = data.get("pickup_location", {}).get("address", {}).get("address_line", "-")
+        self._distance: float | None = data.get("distance")
 
         item: dict = data.get("item", {})
         self.item_id: str = item.get("item_id")  # type: ignore[assignment]
@@ -76,6 +78,7 @@ class Item:
         self._value: float = item_value.get("minor_units", 0) / 10 ** item_value.get("decimals", 0)
         self.currency: str = item_price.get("code", "-")
         self._previous_price: float | None = None
+        self._travel: bool = False
         self.item_logo: str = item.get("logo_picture", {}).get(
             "current_url",
             "https://tgtg-mkt-cms-prod.s3.eu-west-1.amazonaws.com/13512/TGTG_Icon_White_Cirle_1988x1988px_RGB.png",
@@ -98,6 +101,13 @@ class Item:
         if self._rating is None:
             return "-"
         return self._format_decimal(round(self._rating, 1))
+
+    @property
+    def travel_distance(self) -> str:
+        """Distance from the search center in km, as returned by location searches."""
+        if self._distance is None:
+            return "-"
+        return f"{self._format_decimal(round(self._distance / 1000, 1))} km"
 
     @property
     def price(self) -> str:

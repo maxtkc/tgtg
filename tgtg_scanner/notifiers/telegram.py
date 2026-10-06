@@ -9,7 +9,15 @@ from functools import wraps
 from queue import Empty
 from time import sleep
 
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 from telegram.constants import ParseMode
 from telegram.error import (
     BadRequest,
@@ -44,8 +52,8 @@ def _private(func):
     async def wrapper(self: Telegram, update: Update, context: CallbackContext) -> None:
         if not self._is_my_chat(update):
             log.warning(
-                f"Unauthorized access to {func.__name__} from chat id {update.message.chat.id} "
-                f"and user id {update.message.from_user.id}"
+                f"Unauthorized access to {func.__name__} from chat id {update.effective_chat.id} "
+                f"and user id {update.effective_user.id}"
             )
             return
         return await func(self, update, context)
@@ -115,6 +123,10 @@ class Telegram(Notifier):
             CommandHandler("addfavorites", self._add_favorites),
             CommandHandler("removefavorites", self._remove_favorites),
             CommandHandler("getid", self._get_id),
+            CommandHandler("travel", self._travel),
+            CommandHandler("travelstatus", self._travel_status),
+            CommandHandler("home", self._home),
+            MessageHandler(filters.LOCATION, self._location),
             MessageHandler(
                 filters.Regex(r"^https:\/\/share\.toogoodtogo\.com\/item\/(\d+)\/?"),
                 self._url_handler,
@@ -141,6 +153,9 @@ class Telegram(Notifier):
                 BotCommand("addfavorites", "Add item ids to favorites"),
                 BotCommand("removefavorites", "Remove Item ids from favorites"),
                 BotCommand("getid", "Get your chat id"),
+                BotCommand("travel", "Travel mode: alert on well rated bags near a location"),
+                BotCommand("travelstatus", "Show travel mode settings"),
+                BotCommand("home", "Turn travel mode off"),
             ]
         )
         await self.application.start()
@@ -218,6 +233,8 @@ class Telegram(Notifier):
         image = None
         if isinstance(item, Item) and not self.only_reservations and not self.mute:
             message = self._unmask(self.body, item)
+            if item._travel:
+                message = escape_markdown(f"Travel: {item.travel_distance} away\n", version=2) + message
             if self.image:
                 image = self._unmask_image(self.image, item)
         elif isinstance(item, Reservation):
@@ -256,7 +273,7 @@ class Telegram(Notifier):
                 log.error("Telegram Error: %s", err)
 
     def _is_my_chat(self, update: Update) -> bool:
-        return str(update.message.chat.id) in self.chat_ids
+        return update.effective_chat is not None and str(update.effective_chat.id) in self.chat_ids
 
     async def _get_id(self, update: Update, _) -> None:
         await update.message.reply_text(f"Current chat id: {update.message.chat.id}")
@@ -278,6 +295,62 @@ class Telegram(Notifier):
         self.mute = None
         log.info("Reactivated Telegram Notifications")
         await update.message.reply_text("Reactivated Telegram Notifications")
+
+    @_private
+    async def _travel(self, update: Update, context: CallbackContext) -> None:
+        """Enable travel mode: /travel [radius_km] [min_rating] [days]."""
+        if self.travel is None:
+            await update.message.reply_text("Travel mode is not available.")
+            return
+        try:
+            args = context.args or []
+            radius = int(args[0]) if len(args) > 0 else None
+            min_rating = float(args[1]) if len(args) > 1 else None
+            days = float(args[2]) if len(args) > 2 else None
+        except ValueError:
+            await update.message.reply_text("Usage: /travel [radius_km] [min_rating] [days], e.g. /travel 3 4.5 2")
+            return
+        self.travel.start(radius, min_rating, days)
+        log.info("Telegram: %s", self.travel.describe())
+        await update.message.reply_text(
+            f"{self.travel.describe()}\n"
+            "Share your location to set the search center. "
+            "A live location (attachment menu) keeps it updated.",
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("Share location", request_location=True)]],
+                one_time_keyboard=True,
+                resize_keyboard=True,
+            ),
+        )
+
+    @_private
+    async def _location(self, update: Update, _) -> None:
+        """Set the travel search center from a shared (or live) location."""
+        message = update.effective_message
+        if self.travel is None or message is None or message.location is None:
+            return
+        location = message.location
+        self.travel.set_location(location.latitude, location.longitude)
+        log.debug("Telegram: travel location %s, %s", location.latitude, location.longitude)
+        # Live location updates arrive as edited messages; only confirm the first one
+        if update.message is not None:
+            await update.message.reply_text(self.travel.describe(), reply_markup=ReplyKeyboardRemove())
+
+    @_private
+    async def _travel_status(self, update: Update, _) -> None:
+        if self.travel is None:
+            await update.message.reply_text("Travel mode is not available.")
+            return
+        await update.message.reply_text(self.travel.describe())
+
+    @_private
+    async def _home(self, update: Update, _) -> None:
+        if self.travel is None:
+            await update.message.reply_text("Travel mode is not available.")
+            return
+        self.travel.stop()
+        log.info("Telegram: travel mode off")
+        await update.message.reply_text("Travel mode off. Back to favorites.", reply_markup=ReplyKeyboardRemove())
 
     @_private
     async def _reserve_item_menu(self, update: Update, _) -> None:

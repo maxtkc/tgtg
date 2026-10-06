@@ -12,8 +12,9 @@ log = logging.getLogger("tgtg")
 class StockMonitor:
     """Tracks previous item snapshots and decides when to notify."""
 
-    def __init__(self, *, price_monitoring: bool = False) -> None:
+    def __init__(self, *, price_monitoring: bool = False, notify_on_first_sight: bool = False) -> None:
         self.price_monitoring = price_monitoring
+        self.notify_on_first_sight = notify_on_first_sight
         self.state: dict[str, Item] = {}
 
     def observe(self, item: Item) -> bool:
@@ -21,7 +22,9 @@ class StockMonitor:
         previous = self.state.get(item.item_id)
         notify = False
 
-        if previous is not None:
+        if previous is None:
+            notify = self.notify_on_first_sight and item.items_available > 0
+        else:
             item._previous_price = previous._price
             if previous.items_available != item.items_available:
                 log.info(
