@@ -1,13 +1,15 @@
+import asyncio
 import json
 import platform
 from time import sleep
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import responses
 from pytest_mock.plugin import MockerFixture
 
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
+from tgtg_scanner.models.travel import Travel
 from tgtg_scanner.notifiers.apprise import Apprise
 from tgtg_scanner.notifiers.console import Console
 from tgtg_scanner.notifiers.discord import Discord
@@ -366,3 +368,49 @@ def test_discord(test_item: Item, reservations: Reservations, favorites: Favorit
     discord.send(test_item)
     sleep(0.5)
     discord.stop()
+
+
+def test_telegram_travel_commands(reservations: Reservations, favorites: Favorites, mocked_telegram, tmp_path):
+    config = Config()
+    config.telegram.enabled = True
+    config.telegram.token = "1234567890:ABCDEF"
+    config.telegram.chat_ids = ["123456"]
+    config.telegram.body = "New Magic Bags: ${{items_available}}"
+    config.telegram.image = None
+    telegram = Telegram(config, reservations, favorites)
+    telegram.travel = Travel(token_path=str(tmp_path))
+
+    def update(message=None, edited=None):
+        upd = MagicMock()
+        upd.effective_chat.id = 123456
+        upd.message = message
+        upd.effective_message = message or edited
+        return upd
+
+    message = MagicMock()
+    message.reply_text = AsyncMock()
+    context = MagicMock(args=["3", "4.2", "2"])
+    asyncio.run(telegram._travel(update(message), context))
+    assert telegram.travel.state.radius == 3
+    assert telegram.travel.state.min_rating == 4.2
+    assert telegram.travel.is_active is False
+
+    message.location.latitude = 47.99
+    message.location.longitude = 7.85
+    asyncio.run(telegram._location(update(message), None))
+    assert telegram.travel.is_active is True
+
+    edited = MagicMock()
+    edited.location.latitude = 48.0
+    edited.location.longitude = 7.9
+    asyncio.run(telegram._location(update(edited=edited), None))
+    assert telegram.travel.state.latitude == 48.0
+    assert message.reply_text.await_count == 2
+
+    asyncio.run(telegram._home(update(message), None))
+    assert telegram.travel.is_active is False
+
+    stranger = update(message)
+    stranger.effective_chat.id = 999
+    asyncio.run(telegram._travel(stranger, context))
+    assert message.reply_text.await_count == 3
