@@ -82,6 +82,9 @@ You can combine multiple crons as semicolon separated list.
 | TravelRadius    | TRAVEL_RADIUS    | default travel mode search radius in km                                           | `5`         |
 | TravelMinRating | TRAVEL_MIN_RATING | default minimum bag rating in travel mode                                        | `4.5`       |
 | TravelSkipFavorites | TRAVEL_SKIP_FAVORITES | stop scanning favorites while travel mode is on                          | `true`      |
+| GluetunUrl      | GLUETUN_URL      | gluetun control server for `/vpn`                                                 | `http://gluetun:8000` |
+| GluetunApiKey   | GLUETUN_API_KEY  | gluetun control server API key; `/vpn` is off without it                          |             |
+| VpnCountries    | VPN_COUNTRIES    | countries offered as buttons by `/vpn` and the block notice                       | `Germany, United States` |
 | Activity        | ACTIVITY         | show running indicator (always disabled in docker)                                | `true`      |
 | Port            | PORT             | Port for Login Process Webserver. (Defaults to random free port)                  | `0`         |
 |                 | TZ               | timezone for docker based setups, e.g. `Berlin/Europe`                            |             |
@@ -183,6 +186,22 @@ least `TravelMinRating`, both when they are first seen in stock and when they co
 
 Travel notifications are prefixed with the distance from the search center. The settings are
 saved to `travel.json` in the token path and survive restarts.
+
+#### Blocked scans and VPN control
+
+After three scans in a row fail (HTTP 403, another HTTP error, or a connection error), the
+Telegram bot sends one notice with the status and the current VPN exit, and one more once
+scans work again. The metrics `tgtg_api_errors_total{status}` and
+`tgtg_last_scan_success_timestamp_seconds` expose the same state to Prometheus.
+
+With `GLUETUN_API_KEY` set, the bot controls a [gluetun](https://github.com/qdm12/gluetun) proxy:
+
+- `/vpn` shows the current exit with buttons for a new server or one of `VpnCountries`.
+- `/vpn new` reconnects to another server in the same country.
+- `/vpn Germany` or `/vpn Germany, Berlin` moves the exit to that country (and city).
+
+After a switch the DataDome cookie is dropped (the file is kept as `datadome.bak-<time>`), so the
+next request fetches one for the new IP. The change lasts until gluetun restarts.
 
 #### Note on Markdown V2
 

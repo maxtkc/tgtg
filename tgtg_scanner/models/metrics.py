@@ -24,6 +24,15 @@ class Metrics:
             "Count of send notifications",
             ["item_id", "display_name"],
         )
+        self.api_errors = Counter(
+            "tgtg_api_errors",
+            "Count of failed TGTG API requests by HTTP status, or conn for connection errors",
+            ["status"],
+        )
+        self.last_scan_success = Gauge(
+            "tgtg_last_scan_success_timestamp_seconds",
+            "Unix time of the last scan with at least one successful TGTG API request",
+        )
 
     def enable_metrics(self) -> None:
         """Start the metrics http server."""

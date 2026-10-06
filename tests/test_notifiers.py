@@ -10,6 +10,7 @@ from pytest_mock.plugin import MockerFixture
 
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
 from tgtg_scanner.models.travel import Travel
+from tgtg_scanner.models.vpn import VpnError, VpnRequest
 from tgtg_scanner.notifiers.apprise import Apprise
 from tgtg_scanner.notifiers.console import Console
 from tgtg_scanner.notifiers.discord import Discord
@@ -414,3 +415,38 @@ def test_telegram_travel_commands(reservations: Reservations, favorites: Favorit
     stranger.effective_chat.id = 999
     asyncio.run(telegram._travel(stranger, context))
     assert message.reply_text.await_count == 3
+
+
+def test_telegram_vpn_command(reservations: Reservations, favorites: Favorites, mocked_telegram):
+    config = Config()
+    config.telegram.enabled = True
+    config.telegram.token = "1234567890:ABCDEF"
+    config.telegram.chat_ids = ["123456"]
+    config.telegram.body = "New Magic Bags: ${{items_available}}"
+    config.telegram.image = None
+    telegram = Telegram(config, reservations, favorites)
+    telegram.vpn = MagicMock(countries=["Germany", "United States"])
+    telegram.vpn.current.return_value = "New York City, United States (1.1.1.1)"
+    telegram.vpn.switch.return_value = "Berlin, Germany (2.2.2.2)"
+
+    update = MagicMock()
+    update.effective_chat.id = 123456
+    update.message.reply_text = AsyncMock()
+
+    asyncio.run(telegram._vpn(update, MagicMock(args=[])))
+    assert "New York City" in update.message.reply_text.call_args.args[0]
+    keyboard = update.message.reply_text.call_args.kwargs["reply_markup"].inline_keyboard
+    assert [b.text for b in keyboard[0]] == ["New server", "Germany", "United States"]
+    assert keyboard[0][1].callback_data == VpnRequest("Germany")
+
+    asyncio.run(telegram._vpn(update, MagicMock(args=["new"])))
+    telegram.vpn.switch.assert_called_with(None, None)
+
+    asyncio.run(telegram._vpn(update, MagicMock(args=["Germany,", "Berlin"])))
+    telegram.vpn.switch.assert_called_with("Germany", "Berlin")
+    assert "Berlin, Germany (2.2.2.2)" in update.message.reply_text.call_args.args[0]
+
+    telegram.vpn.switch.side_effect = VpnError("gluetun unreachable")
+    asyncio.run(telegram._vpn(update, MagicMock(args=["United", "States"])))
+    telegram.vpn.switch.assert_called_with("United States", None)
+    assert "failed" in update.message.reply_text.call_args.args[0]

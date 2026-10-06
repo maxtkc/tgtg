@@ -116,6 +116,11 @@ class TgtgClient(_UpstreamTgtgClient):
             page += 1
         return items
 
+    def forget_datadome(self) -> None:
+        """Drop the DataDome cookie so the next request fetches one for the current IP."""
+        self.session.cookies.clear()
+        self.cookie = None
+
     def get_credentials(self) -> dict:
         """Credentials in the shape the scanner CLI / config persistence expect."""
         self.login()
