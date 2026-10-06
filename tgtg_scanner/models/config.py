@@ -580,6 +580,9 @@ class Config(BaseConfig):
     travel_radius: int = 5
     travel_min_rating: float = 4.5
     travel_skip_favorites: bool = True
+    gluetun_url: str = "http://gluetun:8000"
+    gluetun_api_key: str | None = None
+    vpn_countries: list[str] = field(default_factory=lambda: ["Germany", "United States"])
 
     def __post_init__(self):
         if self.file:
@@ -650,6 +653,9 @@ class Config(BaseConfig):
         self._ini_get_int(parser, "MAIN", "TravelRadius", "travel_radius")
         self._ini_get_float(parser, "MAIN", "TravelMinRating", "travel_min_rating")
         self._ini_get_boolean(parser, "MAIN", "TravelSkipFavorites", "travel_skip_favorites")
+        self._ini_get(parser, "MAIN", "GluetunUrl", "gluetun_url")
+        self._ini_get(parser, "MAIN", "GluetunApiKey", "gluetun_api_key")
+        self._ini_get_list(parser, "MAIN", "VpnCountries", "vpn_countries")
         self._ini_get_int(parser, "MAIN", "Port", "port")
 
     def _read_env(self):
@@ -669,6 +675,9 @@ class Config(BaseConfig):
         self._env_get_int("TRAVEL_RADIUS", "travel_radius")
         self._env_get_float("TRAVEL_MIN_RATING", "travel_min_rating")
         self._env_get_boolean("TRAVEL_SKIP_FAVORITES", "travel_skip_favorites")
+        self._env_get("GLUETUN_URL", "gluetun_url")
+        self._env_get("GLUETUN_API_KEY", "gluetun_api_key")
+        self._env_get_list("VPN_COUNTRIES", "vpn_countries")
         self._env_get_int("PORT", "port")
 
     def _open(self, file: str, mode: str) -> IO[Any]:

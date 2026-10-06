@@ -1,19 +1,30 @@
 import logging
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from queue import Queue
 
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
 from tgtg_scanner.models.reservations import Reservation
 from tgtg_scanner.models.travel import Travel
+from tgtg_scanner.models.vpn import Vpn
 
 log = logging.getLogger("tgtg")
+
+
+@dataclass
+class Notice:
+    """Plain status message from the scanner, optionally with VPN switch buttons."""
+
+    text: str
+    vpn_buttons: bool = False
 
 
 class Notifier(ABC):
     """Base Notifier."""
 
     travel: Travel | None = None
+    vpn: Vpn | None = None
 
     @abstractmethod
     def __init__(self, config: Config, reservations: Reservations, favorites: Favorites):
@@ -23,7 +34,7 @@ class Notifier(ABC):
         self.favorites = favorites
         self.cron = Cron()
         self.thread = threading.Thread(target=self._run)
-        self.queue: Queue[Item | Reservation | None] = Queue()
+        self.queue: Queue[Item | Reservation | Notice | None] = Queue()
 
     @property
     def name(self):
@@ -38,6 +49,8 @@ class Notifier(ABC):
                 item = self.queue.get()
                 if item is None:
                     break
+                if isinstance(item, Notice):
+                    continue
                 log.debug("Sending %s Notification", self.name)
                 self._send(item)
             except KeyboardInterrupt:
@@ -62,6 +75,9 @@ class Notifier(ABC):
                 log.debug("%s Notifier thread is dead. Restarting", self.name)
                 self.thread = threading.Thread(target=self._run)
                 self.start()
+
+    def send_notice(self, notice: Notice) -> None:  # noqa: B027
+        """Send a status notice. Ignored by notifiers that do not support it."""
 
     @abstractmethod
     def _send(self, item: Item | Reservation) -> None:

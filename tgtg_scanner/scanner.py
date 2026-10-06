@@ -1,9 +1,13 @@
+import datetime
 import logging
 import sys
+import time
+from pathlib import Path
 from random import random
 from time import sleep
 from typing import NoReturn
 
+import requests
 from progress.spinner import Spinner
 
 from tgtg_scanner.errors import TgtgAPIError
@@ -16,8 +20,10 @@ from tgtg_scanner.models import (
     Metrics,
     Reservations,
 )
+from tgtg_scanner.models.scan_health import ScanHealth
 from tgtg_scanner.models.stock_monitor import StockMonitor
 from tgtg_scanner.models.travel import Travel
+from tgtg_scanner.models.vpn import Gluetun, Vpn, VpnError
 from tgtg_scanner.notifiers import Notifiers
 from tgtg_scanner.tgtg_client import BASE_URL, TgtgClient, extract_datadome, normalize_cookie, resolve_user_agent
 
@@ -59,6 +65,16 @@ class Scanner:
         self.notifiers: Notifiers | None = None
         self.location: Location | None = None
         self.tgtg_client = self._build_client(config)
+        self.health = ScanHealth()
+        self._scan_ok = False
+        self._scan_error: str | None = None
+        self.vpn: Vpn | None = None
+        if config.gluetun_api_key:
+            self.vpn = Vpn(
+                Gluetun(config.gluetun_url, config.gluetun_api_key),
+                config.vpn_countries,
+                on_switch=self._reset_datadome,
+            )
         self.reservations = Reservations(self.tgtg_client)
         self.favorites = Favorites(self.tgtg_client)
 
@@ -97,6 +113,54 @@ class Scanner:
             extract_datadome(self.tgtg_client),
         )
 
+    def _reset_datadome(self) -> None:
+        """Drop the DataDome cookie after an IP change; the client fetches a fresh one."""
+        self.tgtg_client.forget_datadome()
+        if self.config.token_path is None:
+            return
+        cookie = Path(self.config.token_path, "datadome")
+        if cookie.is_file():
+            parked = cookie.with_name(f"datadome.bak-{datetime.datetime.now():%Y%m%d-%H%M%S}")
+            cookie.rename(parked)
+            log.info("Parked DataDome cookie as %s", parked.name)
+
+    def _api_ok(self) -> None:
+        self._scan_ok = True
+
+    def _api_error(self, err: Exception) -> None:
+        log.error(err)
+        status = str(err.args[0]) if isinstance(err, TgtgAPIError) and err.args else "conn"
+        self._scan_error = status
+        self.metrics.api_errors.labels(status).inc()
+
+    def _check_health(self) -> None:
+        """Report a run of failed scans once, and its recovery once."""
+        if self.notifiers is None:
+            return
+        if self._scan_ok:
+            self.metrics.last_scan_success.set(time.time())
+            if self.health.record_success():
+                self.notifiers.send_notice("TGTG scans work again.")
+        elif self._scan_error is not None and self.health.record_failure(self._scan_error):
+            self.notifiers.send_notice(self._block_message(), vpn_buttons=self.vpn is not None)
+
+    def _block_message(self) -> str:
+        status = self.health.status
+        since = f"{self.health.since:%H:%M}" if self.health.since else "?"
+        if status == "403":
+            text = f"TGTG is blocking this IP: {self.health.failures} scans in a row got 403, since {since}."
+        elif status == "conn":
+            text = f"TGTG is unreachable (connection or proxy error) for {self.health.failures} scans, since {since}."
+        else:
+            text = f"TGTG scans failing with HTTP {status} for {self.health.failures} scans, since {since}."
+        if self.vpn is not None:
+            try:
+                text += f"\nVPN exit: {self.vpn.current()}"
+            except VpnError as err:
+                text += f"\nVPN: {err}"
+            text += "\nPick a new exit below, or use /vpn."
+        return text
+
     def _get_test_item(self) -> Item:
         """Returns an item for test notifications."""
         items = sorted(self._load_favorite_items(), key=lambda x: x.items_available, reverse=True)
@@ -123,16 +187,19 @@ class Scanner:
         for item_id in self.item_ids:
             try:
                 items.append(self._item_from_api(self.tgtg_client.get_item(item_id)))
-            except TgtgAPIError as err:
-                log.error(err)
+                self._api_ok()
+            except (TgtgAPIError, requests.RequestException) as err:
+                self._api_error(err)
         items.extend(self._load_favorite_items())
         return items
 
     def _load_favorite_items(self) -> list[Item]:
         try:
-            return [self._item_from_api(item) for item in self.tgtg_client.get_favorites()]
-        except TgtgAPIError as err:
-            log.error(err)
+            items = [self._item_from_api(item) for item in self.tgtg_client.get_favorites()]
+            self._api_ok()
+            return items
+        except (TgtgAPIError, requests.RequestException) as err:
+            self._api_error(err)
             self.metrics.get_favorites_errors.inc()
             return []
 
@@ -141,6 +208,8 @@ class Scanner:
         if self.notifiers is None:
             raise RuntimeError("Notifiers not initialized!")
 
+        self._scan_ok = False
+        self._scan_error = None
         travel_active = self.travel.is_active
         if travel_active:
             self._travel_job()
@@ -161,6 +230,7 @@ class Scanner:
             if not self.monitor.state:
                 log.warning("No items in observation! Did you add any favorites?")
 
+        self._check_health()
         self._save_tokens()
 
     def _travel_job(self) -> None:
@@ -177,8 +247,9 @@ class Scanner:
                 radius=state.radius,
                 page_size=50,
             )
-        except TgtgAPIError as err:
-            log.error(err)
+            self._api_ok()
+        except (TgtgAPIError, requests.RequestException) as err:
+            self._api_error(err)
             return
         for raw in data:
             item = self._item_from_api(raw)
@@ -215,7 +286,7 @@ class Scanner:
         # activate and test notifiers
         if self.config.metrics:
             self.metrics.enable_metrics()
-        self.notifiers = Notifiers(self.config, self.reservations, self.favorites, self.travel)
+        self.notifiers = Notifiers(self.config, self.reservations, self.favorites, self.travel, self.vpn)
         self.notifiers.start()
         if not self.config.disable_tests and self.notifiers.notifier_count > 0:
             log.info("Sending test Notifications ...")

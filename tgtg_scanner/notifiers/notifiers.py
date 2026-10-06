@@ -3,8 +3,9 @@ import logging
 from tgtg_scanner.models import Config, Cron, Favorites, Item, Reservations
 from tgtg_scanner.models.reservations import Reservation
 from tgtg_scanner.models.travel import Travel
+from tgtg_scanner.models.vpn import Vpn
 from tgtg_scanner.notifiers.apprise import Apprise
-from tgtg_scanner.notifiers.base import Notifier
+from tgtg_scanner.notifiers.base import Notice, Notifier
 from tgtg_scanner.notifiers.console import Console
 from tgtg_scanner.notifiers.discord import Discord
 from tgtg_scanner.notifiers.ifttt import IFTTT
@@ -23,10 +24,18 @@ NOTIFIERS: list[type[Notifier]] = [Apprise, Console, PushSafer, SMTP, IFTTT, Ntf
 class Notifiers:
     """Notifier Manager."""
 
-    def __init__(self, config: Config, reservations: Reservations, favorites: Favorites, travel: Travel | None = None):
+    def __init__(
+        self,
+        config: Config,
+        reservations: Reservations,
+        favorites: Favorites,
+        travel: Travel | None = None,
+        vpn: Vpn | None = None,
+    ):
         self._notifiers: list[Notifier] = [NotifierCls(config, reservations, favorites) for NotifierCls in NOTIFIERS]
         for notifier in self._notifiers:
             notifier.travel = travel
+            notifier.vpn = vpn
         log.info("Activated notifiers:")
         if self.notifier_count == 0:
             log.warning("No notifiers configured!")
@@ -58,6 +67,11 @@ class Notifiers:
         """
         for notifier in self._notifiers:
             notifier.send(item)
+
+    def send_notice(self, text: str, vpn_buttons: bool = False) -> None:
+        """Send a status notice on notifiers that support it."""
+        for notifier in self._notifiers:
+            notifier.send_notice(Notice(text, vpn_buttons))
 
     def start(self) -> None:
         """Start all notifiers."""

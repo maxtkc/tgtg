@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import logging
 import random
+import threading
 import warnings
 from functools import wraps
 from queue import Empty
@@ -42,7 +43,8 @@ from tgtg_scanner.errors import MaskConfigurationError, TelegramConfigurationErr
 from tgtg_scanner.models import Config, Favorites, Item, Reservations
 from tgtg_scanner.models.favorites import AddFavoriteRequest, RemoveFavoriteRequest
 from tgtg_scanner.models.reservations import Order, Reservation
-from tgtg_scanner.notifiers.base import Notifier
+from tgtg_scanner.models.vpn import VpnError, VpnRequest
+from tgtg_scanner.notifiers.base import Notice, Notifier
 
 log = logging.getLogger("tgtg")
 
@@ -126,6 +128,7 @@ class Telegram(Notifier):
             CommandHandler("travel", self._travel),
             CommandHandler("travelstatus", self._travel_status),
             CommandHandler("home", self._home),
+            CommandHandler("vpn", self._vpn),
             MessageHandler(filters.LOCATION, self._location),
             MessageHandler(
                 filters.Regex(r"^https:\/\/share\.toogoodtogo\.com\/item\/(\d+)\/?"),
@@ -157,6 +160,7 @@ class Telegram(Notifier):
                 BotCommand("travelstatus", "Show travel mode settings"),
                 BotCommand("home", "Turn travel mode off"),
             ]
+            + ([BotCommand("vpn", "Show or change the VPN exit: /vpn, /vpn new, /vpn Germany")] if self.vpn else [])
         )
         await self.application.start()
 
@@ -221,12 +225,39 @@ class Telegram(Notifier):
             return bytes(getattr(item, matches[0].group(1)))
         return None
 
-    async def _send(self, item: Item | Reservation) -> None:  # type: ignore[override]
+    def send_notice(self, notice: Notice) -> None:
+        """Queue a status notice. Sent regardless of mute and cron."""
+        if not self.enabled:
+            return
+        self.queue.put(notice)
+        if not self.thread.is_alive():
+            self.thread = threading.Thread(target=self._run)
+            self.start()
+
+    def _vpn_keyboard(self) -> InlineKeyboardMarkup | None:
+        if self.vpn is None:
+            return None
+        buttons = [InlineKeyboardButton("New server", callback_data=VpnRequest())]
+        buttons += [InlineKeyboardButton(country, callback_data=VpnRequest(country)) for country in self.vpn.countries]
+        return InlineKeyboardMarkup([buttons[i : i + 3] for i in range(0, len(buttons), 3)])
+
+    async def _send_notice(self, notice: Notice) -> None:
+        markup = self._vpn_keyboard() if notice.vpn_buttons else None
+        for chat_id in self.chat_ids:
+            try:
+                await self.application.bot.send_message(chat_id=chat_id, text=notice.text, reply_markup=markup)
+            except TelegramError as err:
+                log.error("Telegram Error: %s", err)
+
+    async def _send(self, item: Item | Reservation | Notice) -> None:  # type: ignore[override]
         """Send item information as Telegram message.
 
         Reservation notifications are always send.
         Disable Item notification with mute or only_reservations config.
         """
+        if isinstance(item, Notice):
+            await self._send_notice(item)
+            return
         if self.mute and self.mute < datetime.datetime.now():
             log.info("Reactivated Telegram Notifications")
             self.mute = None
@@ -351,6 +382,39 @@ class Telegram(Notifier):
         self.travel.stop()
         log.info("Telegram: travel mode off")
         await update.message.reply_text("Travel mode off. Back to favorites.", reply_markup=ReplyKeyboardRemove())
+
+    async def _switch_vpn(self, reply, country: str | None = None, city: str | None = None) -> None:
+        """Run a VPN switch off the event loop and report the new exit."""
+        if self.vpn is None:
+            return
+        target = ", ".join(p for p in (city, country) if p) or "a new server"
+        await reply(f"Switching VPN to {target}, this takes up to a minute ...")
+        try:
+            exit_ = await asyncio.to_thread(self.vpn.switch, country, city)
+        except VpnError as err:
+            await reply(f"VPN switch failed: {err}")
+            return
+        await reply(f"VPN exit is now {exit_}. DataDome cookie reset; the next scan uses the new IP.")
+
+    @_private
+    async def _vpn(self, update: Update, context: CallbackContext) -> None:
+        """/vpn shows the exit, /vpn new reconnects, /vpn <country>[, city] moves it."""
+        if self.vpn is None:
+            await update.message.reply_text("VPN control is not configured.")
+            return
+        arg = " ".join(context.args or []).strip()
+        if not arg:
+            try:
+                current = await asyncio.to_thread(self.vpn.current)
+            except VpnError as err:
+                current = str(err)
+            await update.message.reply_text(f"VPN exit: {current}", reply_markup=self._vpn_keyboard())
+            return
+        if arg.lower() == "new":
+            await self._switch_vpn(update.message.reply_text)
+            return
+        country, _, city = (part.strip() for part in arg.partition(","))
+        await self._switch_vpn(update.message.reply_text, country, city or None)
 
     @_private
     async def _reserve_item_menu(self, update: Update, _) -> None:
@@ -505,6 +569,11 @@ class Telegram(Notifier):
 
     async def _callback_query_handler(self, update: Update, _) -> None:
         data = update.callback_query.data
+        if isinstance(data, VpnRequest):
+            if not self._is_my_chat(update) or self.vpn is None:
+                return
+            await update.callback_query.answer()
+            await self._switch_vpn(update.effective_message.reply_text, data.country)
         if isinstance(data, Item):
             self.reservations.reserve(data.item_id, data.display_name)
             await update.callback_query.answer(f"Added {data.display_name} to reservation queue")
