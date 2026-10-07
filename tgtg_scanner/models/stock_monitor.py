@@ -8,6 +8,10 @@ from tgtg_scanner.models.item import Item
 
 log = logging.getLogger("tgtg")
 
+# Dynamic bags step down from 1/2 of value to 1/3. Price drops only notify at the
+# bottom step; 0.34 allows for cent rounding.
+PRICE_DROP_MAX_RATIO = 0.34
+
 
 class StockMonitor:
     """Tracks previous item snapshots and decides when to notify."""
@@ -42,8 +46,20 @@ class StockMonitor:
                     previous.price,
                     item.price,
                 )
-                if self.price_monitoring and item.items_available > 0 and item._price < previous._price:
+                if (
+                    self.price_monitoring
+                    and item.items_available > 0
+                    and item._price < previous._price
+                    and self._at_price_floor(item)
+                ):
                     notify = True
 
         self.state[item.item_id] = item
         return notify
+
+    @staticmethod
+    def _at_price_floor(item: Item) -> bool:
+        """True if the price is at most PRICE_DROP_MAX_RATIO of the value, or the value is unknown."""
+        if item._value <= 0:
+            return True
+        return item._price <= PRICE_DROP_MAX_RATIO * item._value

@@ -36,10 +36,24 @@ def test_no_notify_when_already_in_stock():
     assert monitor.observe(_item("1", 5)) is False
 
 
-def test_notify_on_price_drop():
+def test_notify_on_price_drop_to_a_third():
     monitor = StockMonitor(price_monitoring=True)
-    monitor.observe(_item("1", 1, price_minor=500))
-    assert monitor.observe(_item("1", 1, price_minor=400)) is True
+    monitor.observe(_item("1", 1, price_minor=600))
+    assert monitor.observe(_item("1", 1, price_minor=500)) is True
+
+
+def test_no_notify_on_price_drop_above_a_third():
+    monitor = StockMonitor(price_monitoring=True)
+    monitor.observe(_item("1", 1, price_minor=750))
+    assert monitor.observe(_item("1", 1, price_minor=675)) is False
+    assert monitor.observe(_item("1", 1, price_minor=600)) is False
+    assert monitor.observe(_item("1", 1, price_minor=500)) is True
+
+
+def test_no_notify_on_price_drop_when_sold_out():
+    monitor = StockMonitor(price_monitoring=True)
+    monitor.observe(_item("1", 0, price_minor=600))
+    assert monitor.observe(_item("1", 0, price_minor=500)) is False
 
 
 def test_price_drop_ignored_without_flag():
