@@ -21,7 +21,7 @@ from tgtg_scanner.models import (
     Reservations,
 )
 from tgtg_scanner.models.scan_health import ScanHealth
-from tgtg_scanner.models.stock_monitor import StockMonitor
+from tgtg_scanner.models.stock_monitor import PriceFloors, StockMonitor
 from tgtg_scanner.models.travel import Travel
 from tgtg_scanner.models.vpn import Gluetun, Vpn, VpnError
 from tgtg_scanner.notifiers import Notifiers
@@ -59,9 +59,12 @@ class Scanner:
         self.metrics = Metrics(self.config.metrics_port)
         self.item_ids = {item_id for item_id in self.config.item_ids if item_id}
         self.cron = self.config.schedule_cron
-        self.monitor = StockMonitor(price_monitoring=self.config.price_monitoring)
+        floors = PriceFloors(self.config.token_path)
+        self.monitor = StockMonitor(price_monitoring=self.config.price_monitoring, floors=floors)
         self.travel = Travel(self.config.travel_radius, self.config.travel_min_rating, self.config.token_path)
-        self.travel_monitor = StockMonitor(notify_on_first_sight=True)
+        self.travel_monitor = StockMonitor(
+            price_monitoring=self.config.price_monitoring, notify_on_first_sight=True, floors=floors
+        )
         self.notifiers: Notifiers | None = None
         self.location: Location | None = None
         self.tgtg_client = self._build_client(config)
