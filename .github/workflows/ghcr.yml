@@ -1,11 +1,11 @@
 name: GHCR image
 
-# Builds the alpine image of the travel-mode branch and pushes it to
-# ghcr.io/<owner>/tgtg as travel-mode-<short sha> and travel-mode.
+# Builds the alpine image of the main branch and pushes it to
+# ghcr.io/<owner>/tgtg as main-<short sha> and main.
 on:
   push:
     branches:
-      - travel-mode
+      - main
   workflow_dispatch:
 
 permissions:
@@ -32,8 +32,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/tgtg:travel-mode-${{ steps.tag.outputs.sha }}
-            ghcr.io/${{ github.repository_owner }}/tgtg:travel-mode
+            ghcr.io/${{ github.repository_owner }}/tgtg:main-${{ steps.tag.outputs.sha }}
+            ghcr.io/${{ github.repository_owner }}/tgtg:main
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
