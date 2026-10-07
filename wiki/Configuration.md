@@ -78,7 +78,7 @@ You can combine multiple crons as semicolon separated list.
 | Quiet           | QUIET            | minimal console output                                                            | `false`     |
 | Locale          | LOCALE           | localization                                                                      | `en_US`     |
 | TimeFormat      | TIME_FORMAT      | 12h or 24h                                                                        | `24h`       |
-| PriceMonitoring | PRICE_MONITORING | Send notifications on price drops                                                 | `false`     |
+| PriceMonitoring | PRICE_MONITORING | Notify only when a bag is in stock at its lowest seen price (dynamic bags)       | `false`     |
 | TravelRadius    | TRAVEL_RADIUS    | default travel mode search radius in km                                           | `5`         |
 | TravelMinRating | TRAVEL_MIN_RATING | default minimum bag rating in travel mode                                        | `4.5`       |
 | TravelSkipFavorites | TRAVEL_SKIP_FAVORITES | stop scanning favorites while travel mode is on                          | `true`      |
