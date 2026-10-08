@@ -11,6 +11,7 @@ import contextlib
 import logging
 import re
 from collections.abc import Iterator
+from urllib.parse import urlsplit
 
 import tgtg
 from tgtg import BASE_URL
@@ -88,6 +89,25 @@ class TgtgClient(_UpstreamTgtgClient):
         if kwargs.get("url") and kwargs["url"] != BASE_URL:
             log.warning("Using custom tgtg base url: %s", kwargs["url"])
         super().__init__(*args, **kwargs)
+        datadome = extract_datadome(self)
+        if datadome:
+            self._set_datadome(datadome)
+
+    @property
+    def _headers(self) -> dict:
+        # Send DataDome only from the session jar; an explicit Cookie header would shadow fresh cookies.
+        headers = super()._headers
+        headers.pop("Cookie", None)
+        return headers
+
+    def _set_datadome(self, value: str) -> None:
+        self.session.cookies.set(
+            "datadome",
+            value,
+            domain=f".{urlsplit(self.base_url).hostname}",
+            path="/",
+            secure=True,
+        )
 
     def login(self) -> None:
         try:
