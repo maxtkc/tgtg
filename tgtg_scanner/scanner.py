@@ -278,8 +278,16 @@ class Scanner:
     def run(self) -> NoReturn:
         """Main Loop of the Scanner."""
         # test tgtg API
-        self.tgtg_client.login()
-        self._save_tokens()
+        api_ok = True
+        try:
+            self.tgtg_client.login()
+            self._save_tokens()
+        except (TgtgAPIError, requests.RequestException) as err:
+            # With stored tokens, start anyway so the bot can report the block and switch the VPN.
+            if not (self.tgtg_client.access_token and self.tgtg_client.refresh_token):
+                raise
+            log.warning("TGTG login failed, starting without it: %s", err)
+            api_ok = False
         # activate location service
         self.location = Location(
             self.config.location.enabled,
@@ -291,7 +299,7 @@ class Scanner:
             self.metrics.enable_metrics()
         self.notifiers = Notifiers(self.config, self.reservations, self.favorites, self.travel, self.vpn)
         self.notifiers.start()
-        if not self.config.disable_tests and self.notifiers.notifier_count > 0:
+        if api_ok and not self.config.disable_tests and self.notifiers.notifier_count > 0:
             log.info("Sending test Notifications ...")
             self.notifiers.send(self._get_test_item())
         # start scanner

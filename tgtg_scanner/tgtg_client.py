@@ -22,6 +22,7 @@ from tgtg_scanner.pin_prompt import prompt_via_browser
 log = logging.getLogger("tgtg")
 
 _DATADOME_RE = re.compile(r"datadome=([^;]+)", re.IGNORECASE)
+_UA_VERSION_RE = re.compile(r"TGTG/(\S+)")
 
 
 def normalize_cookie(value: str | None) -> str | None:
@@ -89,6 +90,10 @@ class TgtgClient(_UpstreamTgtgClient):
         if kwargs.get("url") and kwargs["url"] != BASE_URL:
             log.warning("Using custom tgtg base url: %s", kwargs["url"])
         super().__init__(*args, **kwargs)
+        # Report the configured APK version to the DataDome SDK, not upstream's default.
+        version = _UA_VERSION_RE.match(self.user_agent or "")
+        if version and not hasattr(self, "version"):
+            self.version = version.group(1)
         datadome = extract_datadome(self)
         if datadome:
             self._set_datadome(datadome)
