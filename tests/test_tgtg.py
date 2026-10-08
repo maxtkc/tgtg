@@ -85,6 +85,45 @@ def test_login_with_tokens_and_datadome():
     assert extract_datadome(client)
 
 
+def _bucket_cookies() -> list[str]:
+    return [c.request.headers.get("Cookie", "") for c in responses.calls if tgtg.API_BUCKET_ENDPOINT in c.request.url]
+
+
+def _token_client(cookie: str) -> TgtgClient:
+    client = TgtgClient(
+        email="test@example.com",
+        access_token="at",
+        refresh_token="rt",
+        cookie=normalize_cookie(cookie),
+        user_agent="TGTG/test",
+    )
+    client.login = lambda: None  # type: ignore[method-assign]
+    return client
+
+
+@responses.activate
+def test_datadome_403_retry_sends_fresh_cookie():
+    _datadome_sdk()
+    url = urljoin(BASE_URL, tgtg.API_BUCKET_ENDPOINT)
+    responses.add(responses.POST, url, json={}, status=403)
+    responses.add(responses.POST, url, json={"mobile_bucket": {"items": []}}, status=200)
+    client = _token_client("olddd")
+    assert client.get_favorites() == []
+    assert _bucket_cookies() == ["datadome=olddd", "datadome=testdd"]
+
+
+@responses.activate
+def test_forget_datadome_sends_fresh_cookie():
+    _datadome_sdk()
+    url = urljoin(BASE_URL, tgtg.API_BUCKET_ENDPOINT)
+    responses.add(responses.POST, url, json={"mobile_bucket": {"items": []}}, status=200)
+    client = _token_client("olddd")
+    client.forget_datadome()
+    client.get_favorites()
+    assert _bucket_cookies() == ["datadome=testdd"]
+    assert extract_datadome(client) == "testdd"
+
+
 @responses.activate
 def test_get_favorites_loads_all_pages(tgtg_item: dict):
     _datadome_sdk()
