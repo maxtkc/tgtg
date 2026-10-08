@@ -160,7 +160,7 @@ class Telegram(Notifier):
                 BotCommand("travelstatus", "Show travel mode settings"),
                 BotCommand("home", "Turn travel mode off"),
             ]
-            + ([BotCommand("vpn", "Show or change the VPN exit: /vpn, /vpn new, /vpn Germany")] if self.vpn else [])
+            + ([BotCommand("vpn", "VPN route and exit: /vpn, /vpn on, /vpn off, /vpn new, /vpn Germany")] if self.vpn else [])
         )
         await self.application.start()
 
@@ -237,8 +237,12 @@ class Telegram(Notifier):
     def _vpn_keyboard(self) -> InlineKeyboardMarkup | None:
         if self.vpn is None:
             return None
+        if self.vpn.mode == "direct":
+            return InlineKeyboardMarkup([[InlineKeyboardButton("Use VPN", callback_data=VpnRequest(mode="vpn"))]])
         buttons = [InlineKeyboardButton("New server", callback_data=VpnRequest())]
         buttons += [InlineKeyboardButton(country, callback_data=VpnRequest(country)) for country in self.vpn.countries]
+        if self.vpn.configured:
+            buttons.append(InlineKeyboardButton("Try direct", callback_data=VpnRequest(mode="direct")))
         return InlineKeyboardMarkup([buttons[i : i + 3] for i in range(0, len(buttons), 3)])
 
     async def _send_notice(self, notice: Notice) -> None:
@@ -396,9 +400,23 @@ class Telegram(Notifier):
             return
         await reply(f"VPN exit is now {exit_}. DataDome cookie reset; the next scan uses the new IP.")
 
+    async def _set_vpn_mode(self, reply, mode: str) -> None:
+        """Route TGTG traffic through the VPN ("vpn") or direct ("direct") and report it."""
+        if self.vpn is None:
+            return
+        try:
+            route = await asyncio.to_thread(self.vpn.set_mode, mode)
+        except VpnError as err:
+            await reply(f"VPN mode change failed: {err}")
+            return
+        await reply(f"TGTG traffic: {route}. DataDome cookie reset; the next scan uses this route.")
+
     @_private
     async def _vpn(self, update: Update, context: CallbackContext) -> None:
-        """/vpn shows the exit, /vpn new reconnects, /vpn <country>[, city] moves it."""
+        """/vpn shows the route, /vpn on|off picks VPN or direct, /vpn new reconnects, /vpn <country>[, city] moves it.
+
+        /vpn new and /vpn <country> switch back to VPN mode when direct.
+        """
         if self.vpn is None:
             await update.message.reply_text("VPN control is not configured.")
             return
@@ -408,7 +426,11 @@ class Telegram(Notifier):
                 current = await asyncio.to_thread(self.vpn.current)
             except VpnError as err:
                 current = str(err)
-            await update.message.reply_text(f"VPN exit: {current}", reply_markup=self._vpn_keyboard())
+            label = "TGTG traffic" if self.vpn.mode == "direct" else "VPN exit"
+            await update.message.reply_text(f"{label}: {current}", reply_markup=self._vpn_keyboard())
+            return
+        if arg.lower() in ("on", "off"):
+            await self._set_vpn_mode(update.message.reply_text, "vpn" if arg.lower() == "on" else "direct")
             return
         if arg.lower() == "new":
             await self._switch_vpn(update.message.reply_text)
@@ -573,7 +595,10 @@ class Telegram(Notifier):
             if not self._is_my_chat(update) or self.vpn is None:
                 return
             await update.callback_query.answer()
-            await self._switch_vpn(update.effective_message.reply_text, data.country)
+            if data.mode:
+                await self._set_vpn_mode(update.effective_message.reply_text, data.mode)
+            else:
+                await self._switch_vpn(update.effective_message.reply_text, data.country)
         if isinstance(data, Item):
             self.reservations.reserve(data.item_id, data.display_name)
             await update.callback_query.answer(f"Added {data.display_name} to reservation queue")

@@ -1,4 +1,5 @@
 import json
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -135,3 +136,69 @@ def test_scanner_reset_datadome_parks_cookie(tmp_path, monkeypatch, fresh_metric
     assert "datadome" not in scanner.tgtg_client.session.cookies
     assert not (tmp_path / "datadome").exists()
     assert len(list(tmp_path.glob("datadome.bak-*"))) == 1
+
+
+def test_vpn_mode_toggles_proxy_and_persists(tmp_path, monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://gluetun:8888")
+    monkeypatch.delenv("https_proxy", raising=False)
+    gluetun = MagicMock()
+    gluetun.public_ip.return_value = _ip("1.1.1.1")
+    on_switch = MagicMock()
+    vpn = Vpn(gluetun, [], on_switch=on_switch, token_path=str(tmp_path))
+    assert vpn.mode == "vpn"
+
+    assert vpn.set_mode("direct") == "direct (home IP)"
+    assert "HTTPS_PROXY" not in os.environ
+    assert json.loads((tmp_path / "vpn.json").read_text()) == {"mode": "direct"}
+    on_switch.assert_called_once()
+    vpn.set_mode("direct")
+    on_switch.assert_called_once()
+    gluetun.public_ip.assert_not_called()
+
+    # A restart keeps direct mode, using the proxy from the environment to switch back
+    monkeypatch.setenv("HTTPS_PROXY", "http://gluetun:8888")
+    restarted = Vpn(gluetun, [], on_switch=on_switch, token_path=str(tmp_path))
+    assert restarted.mode == "direct"
+    assert "HTTPS_PROXY" not in os.environ
+
+    assert restarted.set_mode("vpn") == "New York City, United States (1.1.1.1)"
+    assert os.environ["HTTPS_PROXY"] == "http://gluetun:8888"
+    assert json.loads((tmp_path / "vpn.json").read_text()) == {"mode": "vpn"}
+    assert on_switch.call_count == 2
+
+
+def test_vpn_mode_without_proxy(monkeypatch):
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    vpn = Vpn(MagicMock(), [])
+    assert vpn.configured is False
+    with pytest.raises(VpnError, match="HTTPS_PROXY"):
+        vpn.set_mode("direct")
+
+
+def test_vpn_switch_from_direct_restores_proxy(mocker, monkeypatch):
+    mocker.patch("tgtg_scanner.models.vpn.time.sleep")
+    monkeypatch.setenv("HTTPS_PROXY", "http://gluetun:8888")
+    gluetun = MagicMock()
+    gluetun.public_ip.side_effect = [_ip("1.1.1.1"), _ip("2.2.2.2", "Berlin", "Germany")]
+    vpn = Vpn(gluetun, [])
+    vpn._apply("direct")
+
+    assert vpn.switch("Germany") == "Berlin, Germany (2.2.2.2)"
+    assert vpn.mode == "vpn"
+    assert os.environ["HTTPS_PROXY"] == "http://gluetun:8888"
+
+
+def test_scanner_block_notice_direct(mocker, tmp_path, monkeypatch, fresh_metrics):
+    monkeypatch.setenv("TGTG_TOKEN_PATH", str(tmp_path))
+    monkeypatch.setenv("HTTPS_PROXY", "http://gluetun:8888")
+    (tmp_path / "vpn.json").write_text('{"mode": "direct"}')
+    config = Config()
+    config.gluetun_api_key = "key"
+    scanner = Scanner(config)
+    current = mocker.patch.object(scanner.vpn.gluetun, "public_ip")
+    scanner.health.record_failure("403")
+
+    text = scanner._block_message()
+    assert "direct (home IP)" in text and "/vpn on" in text
+    current.assert_not_called()
