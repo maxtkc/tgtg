@@ -425,7 +425,7 @@ def test_telegram_vpn_command(reservations: Reservations, favorites: Favorites, 
     config.telegram.body = "New Magic Bags: ${{items_available}}"
     config.telegram.image = None
     telegram = Telegram(config, reservations, favorites)
-    telegram.vpn = MagicMock(countries=["Germany", "United States"])
+    telegram.vpn = MagicMock(countries=["Germany", "United States"], mode="vpn", configured=True)
     telegram.vpn.current.return_value = "New York City, United States (1.1.1.1)"
     telegram.vpn.switch.return_value = "Berlin, Germany (2.2.2.2)"
 
@@ -438,6 +438,7 @@ def test_telegram_vpn_command(reservations: Reservations, favorites: Favorites, 
     keyboard = update.message.reply_text.call_args.kwargs["reply_markup"].inline_keyboard
     assert [b.text for b in keyboard[0]] == ["New server", "Germany", "United States"]
     assert keyboard[0][1].callback_data == VpnRequest("Germany")
+    assert keyboard[1][0].callback_data == VpnRequest(mode="direct")
 
     asyncio.run(telegram._vpn(update, MagicMock(args=["new"])))
     telegram.vpn.switch.assert_called_with(None, None)
@@ -449,4 +450,34 @@ def test_telegram_vpn_command(reservations: Reservations, favorites: Favorites, 
     telegram.vpn.switch.side_effect = VpnError("gluetun unreachable")
     asyncio.run(telegram._vpn(update, MagicMock(args=["United", "States"])))
     telegram.vpn.switch.assert_called_with("United States", None)
+    assert "failed" in update.message.reply_text.call_args.args[0]
+
+
+def test_telegram_vpn_mode(reservations: Reservations, favorites: Favorites, mocked_telegram):
+    config = Config()
+    config.telegram.enabled = True
+    config.telegram.token = "1234567890:ABCDEF"
+    config.telegram.chat_ids = ["123456"]
+    config.telegram.image = None
+    telegram = Telegram(config, reservations, favorites)
+    telegram.vpn = MagicMock(countries=["Germany"], mode="direct", configured=True)
+    telegram.vpn.current.return_value = "direct (home IP)"
+    telegram.vpn.set_mode.return_value = "direct (home IP)"
+
+    update = MagicMock()
+    update.effective_chat.id = 123456
+    update.message.reply_text = AsyncMock()
+
+    asyncio.run(telegram._vpn(update, MagicMock(args=[])))
+    assert update.message.reply_text.call_args.args[0] == "TGTG traffic: direct (home IP)"
+    keyboard = update.message.reply_text.call_args.kwargs["reply_markup"].inline_keyboard
+    assert [[b.callback_data for b in row] for row in keyboard] == [[VpnRequest(mode="vpn")]]
+
+    asyncio.run(telegram._vpn(update, MagicMock(args=["off"])))
+    telegram.vpn.set_mode.assert_called_with("direct")
+    asyncio.run(telegram._vpn(update, MagicMock(args=["ON"])))
+    telegram.vpn.set_mode.assert_called_with("vpn")
+
+    telegram.vpn.set_mode.side_effect = VpnError("no VPN proxy (HTTPS_PROXY) is configured")
+    asyncio.run(telegram._vpn(update, MagicMock(args=["on"])))
     assert "failed" in update.message.reply_text.call_args.args[0]

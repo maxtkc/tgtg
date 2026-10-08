@@ -77,6 +77,7 @@ class Scanner:
                 Gluetun(config.gluetun_url, config.gluetun_api_key),
                 config.vpn_countries,
                 on_switch=self._reset_datadome,
+                token_path=config.token_path,
             )
         self.reservations = Reservations(self.tgtg_client)
         self.favorites = Favorites(self.tgtg_client)
@@ -156,7 +157,10 @@ class Scanner:
             text = f"TGTG is unreachable (connection or proxy error) for {self.health.failures} scans, since {since}."
         else:
             text = f"TGTG scans failing with HTTP {status} for {self.health.failures} scans, since {since}."
-        if self.vpn is not None:
+        if self.vpn is not None and self.vpn.mode == "direct":
+            text += "\nRoute: direct (home IP)"
+            text += "\nUse the VPN below, or /vpn on."
+        elif self.vpn is not None:
             try:
                 text += f"\nVPN exit: {self.vpn.current()}"
             except VpnError as err:
