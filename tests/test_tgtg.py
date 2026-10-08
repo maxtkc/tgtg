@@ -192,3 +192,10 @@ def test_tgtg_api(item_properties: dict):
     client.set_favorite(item_id, False)
     client.set_favorite(item_id, True)
     assert client.get_item(item_id).get("item", {}).get("item_id") == item_id
+
+
+def test_sdk_version_follows_configured_user_agent():
+    client = TgtgClient(
+        access_token="at", refresh_token="rt", cookie="datadome=dd", user_agent=resolve_user_agent(apk_version="26.2.10")
+    )
+    assert client.version == "26.2.10"
